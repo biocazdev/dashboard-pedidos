@@ -42,7 +42,13 @@ def faturamento_bruto_cabecalho(notas: pd.DataFrame) -> float:
     F2_LOJA) - porque o mesmo numero de nota+serie pode se repetir para
     clientes/lojas diferentes. Usar so (nota, serie) sub-contava notas
     distintas e deixava este total MENOR que o faturamento liquido por item,
-    o que nao faz sentido (o bruto com impostos deveria ser >= o liquido)."""
+    o que nao faz sentido (o bruto com impostos deveria ser >= o liquido).
+
+    CONHECIDO (2026-11-15): mesmo com a deduplicacao correta, este total pode
+    aparecer MENOR que faturamento_total() nesta instalacao, porque o campo
+    F2_VALFAT nao e preenchido de forma confiavel aqui (varias notas com
+    F2_VALFAT=0). Ver nota em queries.sql. Decisao do cliente: manter assim
+    por enquanto e investigar com o time fiscal/TI do Protheus."""
     if notas.empty:
         return 0.0
     chave = [c for c in ["nota", "serie", "cod_cliente", "loja_cliente"] if c in notas.columns]

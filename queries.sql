@@ -140,3 +140,16 @@ WHERE F2.D_E_L_E_T_ = ''
 --     SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
 --     WHERE TABLE_NAME IN ('SC5xxx','SC6xxx','SD2xxx','SF2xxx','SA1xxx','SB1xxx','SA3xxx')
 --   para descobrir os nomes reais.
+-- * CONHECIDO (confirmado em 2026-11-15 via consulta de diagnostico, com o
+--   usuario Lealdo): nesta instalacao, F2_VALFAT (usado no KPI "Faturamento
+--   total c/ impostos") NAO e preenchido de forma confiavel - varias notas
+--   tem F2_VALFAT = 0 mesmo com itens/F2_VALMERC normais, e pelo menos uma
+--   nota teve F2_VALFAT divergente do valor real sem explicacao aparente.
+--   Ja F2_VALMERC bateu exatamente com SUM(D2_TOTAL) em 100% das notas
+--   verificadas. Decisao do cliente (Biocaz): manter o calculo como esta por
+--   enquanto (usando F2_VALFAT) e investigar com o time fiscal/TI do
+--   Protheus por que o campo nao esta sendo gravado corretamente. Se for
+--   confirmado que F2_VALFAT e mesmo nao-confiavel neste ambiente, trocar
+--   kpis.faturamento_bruto_cabecalho() para usar F2_VALMERC (mas nesse caso
+--   o indicador provavelmente fica identico ao "Faturamento liquido", ja
+--   que VALMERC = SUM(D2_TOTAL) nos dados observados).
