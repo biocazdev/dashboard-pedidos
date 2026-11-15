@@ -389,7 +389,6 @@ for _chave, _opts in (
 with st.sidebar:
     st.divider()
     st.header("Filtros")
-    st.caption("Dica: clicar numa barra dos gráficos também filtra (clique de novo para remover).")
     vendedor_sel = st.multiselect("Vendedor", vendedor_opts, placeholder="Todos", key="filtro_vendedor")
     cliente_sel = st.multiselect("Cliente", cliente_opts, placeholder="Todos", key="filtro_cliente")
     grupo_sel = st.multiselect("Grupo de produto", grupo_opts, placeholder="Todos", key="filtro_grupo")
@@ -534,15 +533,19 @@ with aba_geral:
         st.caption("Sem dados de faturamento no período para exibir a evolução.")
     else:
         fig = go.Figure()
-        fig.add_trace(go.Bar(
+        fig.add_trace(go.Scatter(
             x=evo["mes"], y=evo["faturamento"],
-            marker_color=BIOCAZ["teal"],
-            marker_line_width=0,
+            mode="lines+markers",
+            line=dict(color=BIOCAZ["teal"], width=3, shape="spline", smoothing=0.3),
+            marker=dict(size=7, color=BIOCAZ["teal"], line=dict(color=SURFACE, width=1)),
+            fill="tozeroy",
+            fillcolor="rgba(67, 170, 138, 0.12)",
             hovertemplate="%{x|%b/%Y}<br>Faturamento: R$ %{y:,.2f}<extra></extra>",
         ))
         fig.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False)
         estiliza_eixos(fig)
         fig.update_xaxes(type="date", dtick="M1", tickformat="%b/%Y")
+        fig.update_yaxes(rangemode="tozero")
         st.plotly_chart(fig, use_container_width=True)
 
 # ===========================================================================
