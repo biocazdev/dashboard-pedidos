@@ -713,6 +713,21 @@ with aba_rankings:
         aplica_rotulos_esquerda(fig, mix["produto"])
         st.plotly_chart(fig, use_container_width=True)
 
+        tabela_mix = mix.sort_values("faturamento", ascending=False).copy()
+        tabela_mix["faturamento"] = tabela_mix["faturamento"].apply(moeda)
+        if "quantidade" in tabela_mix.columns:
+            tabela_mix["quantidade"] = tabela_mix["quantidade"].apply(numero)
+        if "participacao_pct" in tabela_mix.columns:
+            tabela_mix["participacao_pct"] = tabela_mix["participacao_pct"].apply(percentual)
+        colunas_tabela = {
+            "produto": "Produto", "faturamento": "Faturamento",
+            "quantidade": "Quantidade", "participacao_pct": "% do mix exibido",
+        }
+        tabela_mix = tabela_mix[[c for c in colunas_tabela if c in tabela_mix.columns]]
+        tabela_mix = tabela_mix.rename(columns=colunas_tabela)
+        st.caption("Detalhes do mix exibido acima:")
+        st.dataframe(tabela_mix, use_container_width=True, hide_index=True)
+
 # ===========================================================================
 # ABA: Metas de Vendas
 # ===========================================================================

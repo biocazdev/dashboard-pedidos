@@ -158,8 +158,13 @@ def faturamento_por_cliente(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFram
 
 def faturamento_por_produto(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
     if notas.empty:
-        return pd.DataFrame(columns=["produto", "faturamento"])
-    out = notas.groupby("produto", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
+        return pd.DataFrame(columns=["produto", "faturamento", "quantidade", "participacao_pct"])
+    agregado = {"valor_item": "sum"}
+    if "quantidade" in notas.columns:
+        agregado["quantidade"] = "sum"
+    out = notas.groupby("produto", as_index=False).agg(agregado).rename(columns={"valor_item": "faturamento"})
+    total = out["faturamento"].sum()
+    out["participacao_pct"] = (out["faturamento"] / total * 100) if total else 0.0
     return out.sort_values("faturamento", ascending=False).head(top_n)
 
 
