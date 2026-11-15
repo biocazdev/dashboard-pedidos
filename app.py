@@ -397,6 +397,12 @@ with st.sidebar:
         regional_sel = st.multiselect("Regional", regional_opts, placeholder="Todos", key="filtro_regional")
 
     st.divider()
+    # on_click roda ANTES do script recarregar os dados nesta mesma execucao
+    # (mesmo o botao estando aqui, antes do bloco de conexao visualmente
+    # abaixo) - assim o cache ja sai limpo a tempo.
+    st.button("🔄 Atualizar dados", use_container_width=True, on_click=st.cache_data.clear)
+
+    st.divider()
     if db.is_demo_mode():
         st.warning("Modo DEMO ativo — dados fictícios.")
     else:
@@ -405,12 +411,6 @@ with st.sidebar:
         resumo = db.connection_summary()
         for chave, valor in resumo.items():
             st.caption(f"**{chave}:** {valor}")
-
-    st.divider()
-    # on_click roda ANTES do script recarregar os dados nesta mesma execucao
-    # (mesmo o botao estando aqui embaixo, depois do carregar_dados() visual-
-    # mente mais acima no codigo) - assim o cache ja sai limpo a tempo.
-    st.button("🔄 Atualizar dados", use_container_width=True, on_click=st.cache_data.clear)
 
 dataset_f = kpis.aplicar_filtros(
     pedidos_raw, itens_pedido_raw, notas_raw, notas_periodo_raw,
