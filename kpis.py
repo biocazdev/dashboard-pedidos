@@ -35,16 +35,25 @@ def faturamento_total(notas: pd.DataFrame) -> float:
 
 def faturamento_bruto_cabecalho(notas: pd.DataFrame) -> float:
     """Soma do valor de CABECALHO da NF (F2_VALFAT, com impostos), contado
-    uma unica vez por nota (evita duplicar por causa dos itens)."""
+    uma unica vez por nota (evita duplicar por causa dos itens).
+
+    A chave de deduplicacao precisa ser (nota, serie, cod_cliente, loja_cliente)
+    - igual ao JOIN real entre SF2/SD2 no Protheus (F2_DOC+F2_SERIE+F2_CLIENTE+
+    F2_LOJA) - porque o mesmo numero de nota+serie pode se repetir para
+    clientes/lojas diferentes. Usar so (nota, serie) sub-contava notas
+    distintas e deixava este total MENOR que o faturamento liquido por item,
+    o que nao faz sentido (o bruto com impostos deveria ser >= o liquido)."""
     if notas.empty:
         return 0.0
-    return float(notas.drop_duplicates(subset=["nota", "serie"])["valor_faturado"].sum())
+    chave = [c for c in ["nota", "serie", "cod_cliente", "loja_cliente"] if c in notas.columns]
+    return float(notas.drop_duplicates(subset=chave)["valor_faturado"].sum())
 
 
 def total_notas(notas: pd.DataFrame) -> int:
     if notas.empty:
         return 0
-    return int(notas.drop_duplicates(subset=["nota", "serie"]).shape[0])
+    chave = [c for c in ["nota", "serie", "cod_cliente", "loja_cliente"] if c in notas.columns]
+    return int(notas.drop_duplicates(subset=chave).shape[0])
 
 
 def total_pedidos(pedidos: pd.DataFrame) -> int:
