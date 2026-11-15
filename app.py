@@ -725,8 +725,8 @@ with aba_rankings:
         }
         tabela_mix = tabela_mix[[c for c in colunas_tabela if c in tabela_mix.columns]]
         tabela_mix = tabela_mix.rename(columns=colunas_tabela)
-        st.caption("Detalhes do mix exibido acima:")
-        st.dataframe(tabela_mix, use_container_width=True, hide_index=True)
+        with st.expander("Ver detalhes do mix (tabela)"):
+            st.dataframe(tabela_mix, use_container_width=True, hide_index=True)
 
 # ===========================================================================
 # ABA: Metas de Vendas
