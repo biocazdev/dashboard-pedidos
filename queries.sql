@@ -140,16 +140,21 @@ WHERE F2.D_E_L_E_T_ = ''
 --     SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
 --     WHERE TABLE_NAME IN ('SC5xxx','SC6xxx','SD2xxx','SF2xxx','SA1xxx','SB1xxx','SA3xxx')
 --   para descobrir os nomes reais.
--- * CONHECIDO (confirmado em 2026-11-15 via consulta de diagnostico, com o
---   usuario Lealdo): nesta instalacao, F2_VALFAT (usado no KPI "Faturamento
+-- * CONHECIDO/RESOLVIDO (diagnostico em 2026-11-15/16, com o usuario Lealdo):
+--   nesta instalacao, F2_VALFAT (usado originalmente no KPI "Faturamento
 --   total c/ impostos") NAO e preenchido de forma confiavel - varias notas
 --   tem F2_VALFAT = 0 mesmo com itens/F2_VALMERC normais, e pelo menos uma
 --   nota teve F2_VALFAT divergente do valor real sem explicacao aparente.
---   Ja F2_VALMERC bateu exatamente com SUM(D2_TOTAL) em 100% das notas
---   verificadas. Decisao do cliente (Biocaz): manter o calculo como esta por
---   enquanto (usando F2_VALFAT) e investigar com o time fiscal/TI do
---   Protheus por que o campo nao esta sendo gravado corretamente. Se for
---   confirmado que F2_VALFAT e mesmo nao-confiavel neste ambiente, trocar
---   kpis.faturamento_bruto_cabecalho() para usar F2_VALMERC (mas nesse caso
---   o indicador provavelmente fica identico ao "Faturamento liquido", ja
---   que VALMERC = SUM(D2_TOTAL) nos dados observados).
+--   Testes adicionais em 2026-11-16 (consulta direta no banco pelo usuario)
+--   confirmaram que F2_VALMERC e F2_VALBRUT batem EXATAMENTE com
+--   SUM(D2_TOTAL) nas 18 notas do periodo testado (ate o centavo) - ou seja,
+--   nesta empresa/periodo nao ha valor de imposto somado "por fora" no
+--   cabecalho da nota (compativel com ICMS "por dentro" do preco e ausencia
+--   de IPI nessas notas). Decisao do cliente (Biocaz): trocar
+--   kpis.faturamento_bruto_cabecalho() para usar F2_VALMERC a partir de
+--   2026-11-16 (commit correspondente no historico do dashboard). O
+--   indicador "Faturamento total (c/ impostos)" deve, por enquanto, aparecer
+--   igual ao "Faturamento liquido" - isso e esperado dado o resultado acima,
+--   e nao um bug. Pendente: confirmar com o time fiscal/TI do Protheus se
+--   deveria haver IPI ou outro imposto por fora nessas notas; se confirmado
+--   que sim, revisar o campo/calculo novamente.

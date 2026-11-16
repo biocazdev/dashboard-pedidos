@@ -34,25 +34,30 @@ def faturamento_total(notas: pd.DataFrame) -> float:
 
 
 def faturamento_bruto_cabecalho(notas: pd.DataFrame) -> float:
-    """Soma do valor de CABECALHO da NF (F2_VALFAT, com impostos), contado
-    uma unica vez por nota (evita duplicar por causa dos itens).
+    """Soma do valor de CABECALHO da NF (F2_VALMERC), contado uma unica vez
+    por nota (evita duplicar por causa dos itens).
 
     A chave de deduplicacao precisa ser (nota, serie, cod_cliente, loja_cliente)
     - igual ao JOIN real entre SF2/SD2 no Protheus (F2_DOC+F2_SERIE+F2_CLIENTE+
     F2_LOJA) - porque o mesmo numero de nota+serie pode se repetir para
-    clientes/lojas diferentes. Usar so (nota, serie) sub-contava notas
-    distintas e deixava este total MENOR que o faturamento liquido por item,
-    o que nao faz sentido (o bruto com impostos deveria ser >= o liquido).
+    clientes/lojas diferentes.
 
-    CONHECIDO (2026-11-15): mesmo com a deduplicacao correta, este total pode
-    aparecer MENOR que faturamento_total() nesta instalacao, porque o campo
-    F2_VALFAT nao e preenchido de forma confiavel aqui (varias notas com
-    F2_VALFAT=0). Ver nota em queries.sql. Decisao do cliente: manter assim
-    por enquanto e investigar com o time fiscal/TI do Protheus."""
+    HISTORICO (2026-11-15/16): este KPI usava F2_VALFAT (valor de cabecalho
+    "com impostos"), mas o campo nao e preenchido de forma confiavel nesta
+    instalacao (varias notas com F2_VALFAT=0, pelo menos uma divergente).
+    Isso deixava o total MENOR que faturamento_total() por item, o que nao
+    fazia sentido (bruto deveria ser >= liquido). Diagnostico com dados reais
+    (ver queries.sql) confirmou F2_VALFAT quebrado e mostrou que tanto
+    F2_VALMERC quanto F2_VALBRUT batem exatamente com SUM(D2_TOTAL) (ou
+    seja, iguais ao faturamento liquido) nas notas testadas - sinal de que,
+    nesta empresa/periodo, nao ha valor de imposto somado "por fora" no
+    cabecalho da nota (ex.: ICMS "por dentro" do preco, sem incidencia de
+    IPI). Decisao do cliente: trocar para F2_VALMERC agora. Se o time fiscal
+    confirmar que deveria haver IPI/outro imposto por fora, revisar de novo."""
     if notas.empty:
         return 0.0
     chave = [c for c in ["nota", "serie", "cod_cliente", "loja_cliente"] if c in notas.columns]
-    return float(notas.drop_duplicates(subset=chave)["valor_faturado"].sum())
+    return float(notas.drop_duplicates(subset=chave)["valor_mercadoria"].sum())
 
 
 def total_notas(notas: pd.DataFrame) -> int:
