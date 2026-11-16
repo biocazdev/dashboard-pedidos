@@ -71,6 +71,14 @@ PLOTLY_LAYOUT = dict(
     font=dict(family="system-ui, -apple-system, 'Segoe UI', sans-serif", color=INK_SECUNDARIO, size=13),
     margin=dict(l=10, r=10, t=30, b=10),
     hoverlabel=dict(bgcolor=SURFACE, font_color=INK_PRIMARIO, bordercolor=GRID),
+    # clickmode="event+select": sem isso, o Plotly só emite o evento de clique
+    # (tooltip), mas não marca o ponto como selecionado - e o on_select="rerun"
+    # do Streamlit depende exatamente dessa seleção para disparar o filtro.
+    clickmode="event+select",
+    # hovermode="closest": evita que o clique ative o ponto "errado" quando as
+    # barras estão próximas umas das outras (comportamento padrão do Plotly
+    # para eixo categórico pode agrupar o hover/seleção por categoria inteira).
+    hovermode="closest",
 )
 
 
