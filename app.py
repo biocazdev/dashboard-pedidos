@@ -506,7 +506,7 @@ with aba_geral:
         help="Valor de devolução de venda no período (nota de entrada, D1_TIPO='D'). Quanto maior, pior.",
     )
     linha1[2].metric(
-        "Faturamento total (líquido)", moeda(fat_total),
+        "Faturamento líquido", moeda(fat_total),
         delta=delta_pct(kpis.variacao_pct(fat_total, fat_total_ant)) if comparativo_disponivel else None,
         help="Faturamento bruto menos devoluções de venda no período.",
     )
