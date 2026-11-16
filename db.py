@@ -187,7 +187,18 @@ def _fetch_notas(date_start: dt.date, date_end: dt.date, by_pedido_date: bool = 
                 ELSE LTRIM(RTRIM(B1.B1_GRUPO))
             END AS grupo_produto,
             D2.D2_QUANT    AS quantidade,
-            D2.D2_TOTAL    AS valor_item
+            D2.D2_TOTAL    AS valor_item,
+            -- Classificacao igual ao Objeto de Negocio Smart View (TLPP) do
+            -- cliente: so conta como receita (FATURAMENTO) o item cuja TES
+            -- gera duplicata (F4_DUPLIC='S') e cujo tipo nao e devolucao a
+            -- fornecedor ('D') nem beneficiamento ('B'). O resto (remessa,
+            -- bonificacao, amostra, devolucao a fornecedor, beneficiamento)
+            -- e "OUTRAS SAIDAS" - nao compoe faturamento.
+            CASE
+                WHEN F4.F4_DUPLIC = 'S' AND D2.D2_TIPO NOT IN ('D', 'B')
+                    THEN 'FATURAMENTO'
+                ELSE 'OUTRAS SAIDAS'
+            END AS tipo_registro
         FROM {_tbl('SF2')} F2
         INNER JOIN {_tbl('SD2')} D2
                ON D2.D2_DOC = F2.F2_DOC
@@ -217,9 +228,85 @@ def _fetch_notas(date_start: dt.date, date_end: dt.date, by_pedido_date: bool = 
         LEFT JOIN {_tbl('SA3')} A3
                ON A3.A3_COD = C5.C5_VEND1
               AND A3.D_E_L_E_T_ = ''
+        LEFT JOIN {_tbl('SF4')} F4
+               ON F4.F4_CODIGO = D2.D2_TES
+              AND F4.D_E_L_E_T_ = ''
         WHERE F2.D_E_L_E_T_ = ''
           AND F2.F2_FILIAL = ?
           AND {filtro_data}
+    """
+    df = _query(sql, [FILIAL, _yyyymmdd(date_start), _yyyymmdd(date_end)])
+    if not df.empty:
+        df["emissao_nf"] = pd.to_datetime(df["emissao_nf"], format="%Y%m%d", errors="coerce")
+    return df
+
+
+def _fetch_devolucoes_venda(date_start: dt.date, date_end: dt.date) -> pd.DataFrame:
+    """Devolucao de VENDA (cliente devolvendo mercadoria) - no Protheus isso
+    e lancado como nota de ENTRADA (SD1/D1_TIPO='D'), nao de saida, entao
+    nunca aparece em SF2/SD2. Segue a mesma logica do Objeto de Negocio
+    Smart View (TLPP) do cliente: filtra SD1 por D1_TIPO='D' e pela data de
+    DIGITACAO (D1_DTDIGIT), e usa a NF de saida original (via D1_NFORI/
+    D1_SERIORI/D1_FORNECE/D1_LOJA) so para recuperar o vendedor (F2_VEND1).
+
+    Devolve linhas no MESMO formato de _fetch_notas(), com valor_item e
+    quantidade NEGATIVOS (sinal de devolucao) e tipo_registro='DEVOLUCAO',
+    para que, ao concatenar com as notas de faturamento, toda soma/groupby
+    por valor_item ja fique liquida de devolucao automaticamente."""
+    sql = f"""
+        SELECT
+            D1.D1_DOC      AS nota,
+            D1.D1_SERIE    AS serie,
+            D1.D1_DTDIGIT  AS emissao_nf,
+            D1.D1_FORNECE  AS cod_cliente,
+            D1.D1_LOJA     AS loja_cliente,
+            A1.A1_NOME     AS cliente,
+            CC2.CC2_XREGIA AS regiao,
+            CC2.CC2_XREGIO AS regional,
+            F2.F2_VEND1    AS cod_vendedor,
+            A3.A3_NOME     AS vendedor,
+            CAST(0 AS FLOAT) AS valor_faturado,
+            CAST(0 AS FLOAT) AS valor_mercadoria,
+            CAST(NULL AS VARCHAR(20)) AS pedido,
+            CAST(NULL AS VARCHAR(20)) AS item_pedido,
+            D1.D1_COD      AS cod_produto,
+            B1.B1_DESC     AS produto,
+            CASE
+                WHEN NULLIF(LTRIM(RTRIM(BM.BM_DESC)), '') IS NOT NULL
+                    THEN LTRIM(RTRIM(B1.B1_GRUPO)) + ' - ' + LTRIM(RTRIM(BM.BM_DESC))
+                ELSE LTRIM(RTRIM(B1.B1_GRUPO))
+            END AS grupo_produto,
+            -D1.D1_QUANT   AS quantidade,
+            -D1.D1_TOTAL   AS valor_item,
+            'DEVOLUCAO'    AS tipo_registro
+        FROM {_tbl('SD1')} D1
+        LEFT JOIN {_tbl('SF2')} F2
+               ON F2.F2_DOC = D1.D1_NFORI
+              AND F2.F2_SERIE = D1.D1_SERIORI
+              AND F2.F2_CLIENTE = D1.D1_FORNECE
+              AND F2.F2_LOJA = D1.D1_LOJA
+              AND F2.D_E_L_E_T_ = ''
+        LEFT JOIN {_tbl('SA1')} A1
+               ON A1.A1_COD = D1.D1_FORNECE
+              AND A1.A1_LOJA = D1.D1_LOJA
+              AND A1.D_E_L_E_T_ = ''
+        LEFT JOIN {_tbl('CC2')} CC2
+               ON UPPER(RTRIM(CC2.CC2_MUN)) = UPPER(RTRIM(A1.A1_MUN))
+              AND UPPER(RTRIM(CC2.CC2_EST)) = UPPER(RTRIM(A1.A1_EST))
+              AND CC2.D_E_L_E_T_ = ''
+        LEFT JOIN {_tbl('SB1')} B1
+               ON B1.B1_COD = D1.D1_COD
+              AND B1.D_E_L_E_T_ = ''
+        LEFT JOIN {_tbl('SBM')} BM
+               ON BM.BM_GRUPO = B1.B1_GRUPO
+              AND BM.D_E_L_E_T_ = ''
+        LEFT JOIN {_tbl('SA3')} A3
+               ON A3.A3_COD = F2.F2_VEND1
+              AND A3.D_E_L_E_T_ = ''
+        WHERE D1.D_E_L_E_T_ = ''
+          AND D1.D1_FILIAL = ?
+          AND D1.D1_TIPO = 'D'
+          AND D1.D1_DTDIGIT BETWEEN ? AND ?
     """
     df = _query(sql, [FILIAL, _yyyymmdd(date_start), _yyyymmdd(date_end)])
     if not df.empty:
@@ -232,6 +319,18 @@ def _fetch_from_protheus(date_start: dt.date, date_end: dt.date) -> dict:
     itens_pedido = _fetch_itens_pedido(date_start, date_end)
     notas = _fetch_notas(date_start, date_end, by_pedido_date=False)
     notas_dos_pedidos_periodo = _fetch_notas(date_start, date_end, by_pedido_date=True)
+
+    # Devolucao de venda (SD1/D1_TIPO='D') e concatenada em "notas" (com
+    # valor_item/quantidade negativos) para que faturamento liquido e TODOS
+    # os agrupamentos (por cliente/vendedor/produto/regiao/etc.) em kpis.py
+    # ja saiam liquidos de devolucao automaticamente, sem logica especial em
+    # cada funcao. "notas_dos_pedidos_periodo" (usada so para taxa de
+    # conversao/prazo de faturamento) fica de fora de propósito - devolucao
+    # nao faz parte do fluxo pedido->faturamento.
+    devolucoes = _fetch_devolucoes_venda(date_start, date_end)
+    if not devolucoes.empty:
+        notas = pd.concat([notas, devolucoes], ignore_index=True)
+
     return {
         "pedidos": pedidos,
         "itens_pedido": itens_pedido,

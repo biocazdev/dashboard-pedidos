@@ -471,54 +471,70 @@ aba_geral, aba_rankings, aba_metas, aba_alertas = st.tabs(
 # ABA: Visao Geral
 # ===========================================================================
 with aba_geral:
+    fat_bruto = kpis.faturamento_bruto(notas)
+    devolucoes = kpis.devolucoes_total(notas)
     fat_total = kpis.faturamento_total(notas)
     qtd_notas = kpis.total_notas(notas)
     qtd_pedidos = kpis.total_pedidos(pedidos)
     ticket_nf = kpis.ticket_medio_nf(notas)
 
     if comparativo_disponivel:
+        fat_bruto_ant = kpis.faturamento_bruto(notas_ant)
+        devolucoes_ant = kpis.devolucoes_total(notas_ant)
         fat_total_ant = kpis.faturamento_total(notas_ant)
         qtd_notas_ant = kpis.total_notas(notas_ant)
         qtd_pedidos_ant = kpis.total_pedidos(dataset_ant_f["pedidos"])
         ticket_nf_ant = kpis.ticket_medio_nf(notas_ant)
     else:
-        fat_total_ant = qtd_notas_ant = qtd_pedidos_ant = ticket_nf_ant = None
+        fat_bruto_ant = devolucoes_ant = fat_total_ant = None
+        qtd_notas_ant = qtd_pedidos_ant = ticket_nf_ant = None
 
-    linha1 = st.columns(4)
+    # Faturamento bruto -> Devoluções -> Faturamento líquido, na mesma ordem
+    # e com os mesmos nomes do relatório Smart View que o cliente já usa no
+    # Protheus ("Acompanhamento Gerencial de Faturamento"), para que os dois
+    # números batam e sejam fáceis de conferir lado a lado.
+    linha1 = st.columns(5)
     linha1[0].metric(
-        "Faturamento total (líquido)", moeda(fat_total),
-        delta=delta_pct(kpis.variacao_pct(fat_total, fat_total_ant)) if comparativo_disponivel else None,
-        help="Soma do valor dos itens das notas fiscais emitidas no período (sem impostos do cabeçalho).",
+        "Faturamento bruto", moeda(fat_bruto),
+        delta=delta_pct(kpis.variacao_pct(fat_bruto, fat_bruto_ant)) if comparativo_disponivel else None,
+        help="Soma do valor dos itens de venda (FATURAMENTO) no período, antes de descontar devoluções. Não inclui remessas, bonificações, amostras etc. (ver 'outras saídas').",
     )
     linha1[1].metric(
-        "Notas fiscais emitidas", numero(qtd_notas),
-        delta=delta_pct(kpis.variacao_pct(qtd_notas, qtd_notas_ant)) if comparativo_disponivel else None,
-        help="Quantidade de notas fiscais de saída (faturamento) emitidas no período.",
+        "Devoluções", moeda(devolucoes),
+        delta=delta_pct(kpis.variacao_pct(devolucoes, devolucoes_ant)) if comparativo_disponivel else None,
+        delta_color="inverse",
+        help="Valor de devolução de venda no período (nota de entrada, D1_TIPO='D'). Quanto maior, pior.",
     )
     linha1[2].metric(
-        "Pedidos no período", numero(qtd_pedidos),
-        delta=delta_pct(kpis.variacao_pct(qtd_pedidos, qtd_pedidos_ant)) if comparativo_disponivel else None,
-        help="Quantidade de pedidos de venda com emissão dentro do período selecionado.",
+        "Faturamento total (líquido)", moeda(fat_total),
+        delta=delta_pct(kpis.variacao_pct(fat_total, fat_total_ant)) if comparativo_disponivel else None,
+        help="Faturamento bruto menos devoluções de venda no período.",
     )
     linha1[3].metric(
+        "Notas fiscais emitidas", numero(qtd_notas),
+        delta=delta_pct(kpis.variacao_pct(qtd_notas, qtd_notas_ant)) if comparativo_disponivel else None,
+        help="Quantidade de notas fiscais de venda (faturamento) emitidas no período. Não conta documento de devolução.",
+    )
+    linha1[4].metric(
         "Ticket médio por NF", moeda(ticket_nf),
         delta=delta_pct(kpis.variacao_pct(ticket_nf, ticket_nf_ant)) if comparativo_disponivel else None,
-        help="Faturamento total dividido pela quantidade de notas fiscais emitidas no período.",
+        help="Faturamento bruto dividido pela quantidade de notas fiscais emitidas no período.",
     )
 
     if not comparativo_disponivel:
         st.caption("Comparativo com o período anterior indisponível neste momento (falha ao carregar os dados de referência).")
 
     with st.expander("Ver mais indicadores"):
-        fat_bruto = kpis.faturamento_bruto_cabecalho(notas)
+        outras_saidas = kpis.outras_saidas_total(notas)
         ticket_pedido = kpis.ticket_medio_pedido(itens_pedido, pedidos)
         conversao = kpis.taxa_conversao(itens_pedido, notas_periodo)
         prazo = kpis.prazo_medio_faturamento(pedidos, notas_periodo)
 
         linha2 = st.columns(4)
         linha2[0].metric(
-            "Faturamento total (c/ impostos)", moeda(fat_bruto),
-            help="Valor de cabeçalho das notas fiscais (inclui impostos), contado uma única vez por nota.",
+            "Pedidos no período", numero(qtd_pedidos),
+            delta=delta_pct(kpis.variacao_pct(qtd_pedidos, qtd_pedidos_ant)) if comparativo_disponivel else None,
+            help="Quantidade de pedidos de venda com emissão dentro do período selecionado.",
         )
         linha2[1].metric(
             "Ticket médio por pedido", moeda(ticket_pedido),
@@ -532,6 +548,9 @@ with aba_geral:
             "Prazo médio de faturamento",
             f"{prazo['media']:.1f} dias" if prazo["media"] is not None else "-",
             help="Dias entre a emissão do pedido e a emissão da nota fiscal correspondente.",
+        )
+        st.caption(
+            f"Outras saídas no período (remessas, bonificações, amostras etc. — não compõem a receita): {moeda(outras_saidas)}"
         )
 
     st.divider()

@@ -21,50 +21,97 @@ def _sem_bloqueio(serie: pd.Series) -> pd.Series:
     return serie.fillna("").astype(str).str.strip() == ""
 
 
+def _apenas_receita(notas: pd.DataFrame) -> pd.DataFrame:
+    """Filtra para as linhas que realmente compoem receita: FATURAMENTO
+    (venda normal, TES com duplicata) e DEVOLUCAO (devolucao de venda, SD1,
+    ja vem com valor/quantidade negativos). Exclui "OUTRAS SAIDAS" (remessa,
+    bonificacao, amostra, devolucao a fornecedor, beneficiamento...), que
+    nunca deveriam contar como faturamento - classificacao identica ao
+    Objeto de Negocio Smart View (TLPP) "Acompanhamento Gerencial de
+    Faturamento" do cliente (ver HISTORICO em faturamento_bruto()).
+
+    Se a coluna "tipo_registro" nao existir (ex.: DataFrame antigo/parcial),
+    devolve o DataFrame como esta, sem filtrar - mantem compatibilidade."""
+    if "tipo_registro" not in notas.columns:
+        return notas
+    return notas[notas["tipo_registro"].isin(["FATURAMENTO", "DEVOLUCAO"])]
+
+
+def _apenas_faturamento(notas: pd.DataFrame) -> pd.DataFrame:
+    """Filtra so as linhas de venda normal (FATURAMENTO), sem devolucao e
+    sem outras saidas - usado para "Faturamento bruto" (antes de devolucao)
+    e para a contagem de notas fiscais emitidas."""
+    if "tipo_registro" not in notas.columns:
+        return notas
+    return notas[notas["tipo_registro"] == "FATURAMENTO"]
+
+
 # ---------------------------------------------------------------------------
 # KPIs "cabecalho" (cards)
 # ---------------------------------------------------------------------------
 
 def faturamento_total(notas: pd.DataFrame) -> float:
-    """Soma do valor dos ITENS de NF (D2_TOTAL) - evita duplicar o valor do
-    cabecalho quando uma NF tem varios itens."""
+    """Faturamento LIQUIDO: soma do valor dos ITENS de NF de venda normal
+    (FATURAMENTO) MENOS devolucao de venda (DEVOLUCAO, ja vem negativa) -
+    evita duplicar o valor do cabecalho quando uma NF tem varios itens, e
+    exclui remessas/bonificacoes/amostras ("outras saidas"), que nao sao
+    receita. Ver HISTORICO em faturamento_bruto()."""
     if notas.empty:
         return 0.0
-    return float(notas["valor_item"].sum())
+    return float(_apenas_receita(notas)["valor_item"].sum())
 
 
-def faturamento_bruto_cabecalho(notas: pd.DataFrame) -> float:
-    """Soma do valor de CABECALHO da NF (F2_VALMERC), contado uma unica vez
-    por nota (evita duplicar por causa dos itens).
+def faturamento_bruto(notas: pd.DataFrame) -> float:
+    """Faturamento BRUTO: soma do valor dos itens de venda normal
+    (FATURAMENTO), ANTES de subtrair devolucao de venda. Faturamento
+    liquido = Faturamento bruto - Devolucoes (ver devolucoes_total()).
 
-    A chave de deduplicacao precisa ser (nota, serie, cod_cliente, loja_cliente)
-    - igual ao JOIN real entre SF2/SD2 no Protheus (F2_DOC+F2_SERIE+F2_CLIENTE+
-    F2_LOJA) - porque o mesmo numero de nota+serie pode se repetir para
-    clientes/lojas diferentes.
-
-    HISTORICO (2026-11-15/16): este KPI usava F2_VALFAT (valor de cabecalho
-    "com impostos"), mas o campo nao e preenchido de forma confiavel nesta
-    instalacao (varias notas com F2_VALFAT=0, pelo menos uma divergente).
-    Isso deixava o total MENOR que faturamento_total() por item, o que nao
-    fazia sentido (bruto deveria ser >= liquido). Diagnostico com dados reais
-    (ver queries.sql) confirmou F2_VALFAT quebrado e mostrou que tanto
-    F2_VALMERC quanto F2_VALBRUT batem exatamente com SUM(D2_TOTAL) (ou
-    seja, iguais ao faturamento liquido) nas notas testadas - sinal de que,
-    nesta empresa/periodo, nao ha valor de imposto somado "por fora" no
-    cabecalho da nota (ex.: ICMS "por dentro" do preco, sem incidencia de
-    IPI). Decisao do cliente: trocar para F2_VALMERC agora. Se o time fiscal
-    confirmar que deveria haver IPI/outro imposto por fora, revisar de novo."""
+    HISTORICO: ate 2026-11-16, este KPI ("Faturamento total c/ impostos")
+    tentou usar o valor de CABECALHO da NF (primeiro F2_VALFAT, depois
+    F2_VALMERC), na crenca de que bruto x liquido se diferenciavam por
+    imposto. O relatorio Smart View que o cliente ja usa no Protheus
+    (codigo-fonte TLPP compartilhado em 2026-11-16) mostrou que isso estava
+    errado: la, "bruto" e "liquido" NUNCA incluem IPI/ST (ambos ja vem sem
+    imposto por fora) - a diferenca entre eles e DEVOLUCAO DE VENDA, nao
+    imposto. Esta funcao foi reescrita para seguir a mesma logica: soma
+    D2_TOTAL dos itens classificados como FATURAMENTO (TES com duplicata,
+    tipo != D/B - ver _apenas_receita/_apenas_faturamento e a classificacao
+    "tipo_registro" em db.py/queries.sql), sem subtrair devolucao."""
     if notas.empty:
         return 0.0
-    chave = [c for c in ["nota", "serie", "cod_cliente", "loja_cliente"] if c in notas.columns]
-    return float(notas.drop_duplicates(subset=chave)["valor_mercadoria"].sum())
+    return float(_apenas_faturamento(notas)["valor_item"].sum())
+
+
+def devolucoes_total(notas: pd.DataFrame) -> float:
+    """Total de devolucao de venda no periodo (positivo). Devolucao de
+    venda e lancada como nota de ENTRADA no Protheus (SD1/D1_TIPO='D'), e
+    chega aqui com valor_item NEGATIVO (ver _fetch_devolucoes_venda em
+    db.py) - por isso o sinal e invertido aqui para exibir um valor
+    positivo no card, igual ao relatorio Smart View do cliente."""
+    if notas.empty or "tipo_registro" not in notas.columns:
+        return 0.0
+    return float(-notas[notas["tipo_registro"] == "DEVOLUCAO"]["valor_item"].sum())
+
+
+def outras_saidas_total(notas: pd.DataFrame) -> float:
+    """Total de "outras saidas" no periodo (remessa, bonificacao, amostra,
+    devolucao a fornecedor, beneficiamento...) - fica visivel para
+    auditoria/conferencia, mas NAO compoe o faturamento bruto nem liquido."""
+    if notas.empty or "tipo_registro" not in notas.columns:
+        return 0.0
+    return float(notas[notas["tipo_registro"] == "OUTRAS SAIDAS"]["valor_item"].sum())
 
 
 def total_notas(notas: pd.DataFrame) -> int:
+    """Quantidade de notas fiscais de VENDA (FATURAMENTO) emitidas no
+    periodo - nao conta documento de devolucao nem "outras saidas"."""
     if notas.empty:
         return 0
-    chave = [c for c in ["nota", "serie", "cod_cliente", "loja_cliente"] if c in notas.columns]
-    return int(notas.drop_duplicates(subset=chave).shape[0])
+    df = _apenas_faturamento(notas)
+    if df.empty:
+        return 0
+    chave = [c for c in ["nota", "serie", "cod_cliente", "loja_cliente"] if c in df.columns]
+    return int(df.drop_duplicates(subset=chave).shape[0])
 
 
 def total_pedidos(pedidos: pd.DataFrame) -> int:
@@ -80,8 +127,11 @@ def valor_total_pedidos(itens_pedido: pd.DataFrame) -> float:
 
 
 def ticket_medio_nf(notas: pd.DataFrame) -> float:
+    """Ticket medio = Faturamento BRUTO / quantidade de notas - mesma base
+    de calculo do relatorio Smart View do cliente ("faturamento bruto ÷
+    notas"), que usa o bruto (antes de devolucao) e nao o liquido aqui."""
     n = total_notas(notas)
-    return faturamento_total(notas) / n if n else 0.0
+    return faturamento_bruto(notas) / n if n else 0.0
 
 
 def ticket_medio_pedido(itens_pedido: pd.DataFrame, pedidos: pd.DataFrame) -> float:
@@ -154,7 +204,9 @@ def pedidos_bloqueados(itens_pedido: pd.DataFrame) -> dict:
 def evolucao_mensal(notas: pd.DataFrame) -> pd.DataFrame:
     if notas.empty:
         return pd.DataFrame(columns=["mes", "faturamento"])
-    df = notas.copy()
+    df = _apenas_receita(notas).copy()
+    if df.empty:
+        return pd.DataFrame(columns=["mes", "faturamento"])
     df["mes"] = df["emissao_nf"].dt.to_period("M").dt.to_timestamp()
     out = df.groupby("mes", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
     return out.sort_values("mes")
@@ -163,7 +215,9 @@ def evolucao_mensal(notas: pd.DataFrame) -> pd.DataFrame:
 def faturamento_por_vendedor(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
     if notas.empty:
         return pd.DataFrame(columns=["vendedor", "faturamento"])
-    df = notas.copy()
+    df = _apenas_receita(notas).copy()
+    if df.empty:
+        return pd.DataFrame(columns=["vendedor", "faturamento"])
     df["vendedor"] = df["vendedor"].fillna("Sem vendedor").replace("", "Sem vendedor")
     out = df.groupby("vendedor", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
     return out.sort_values("faturamento", ascending=False).head(top_n)
@@ -172,17 +226,23 @@ def faturamento_por_vendedor(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFra
 def faturamento_por_cliente(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
     if notas.empty:
         return pd.DataFrame(columns=["cliente", "faturamento"])
-    out = notas.groupby("cliente", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
+    df = _apenas_receita(notas)
+    if df.empty:
+        return pd.DataFrame(columns=["cliente", "faturamento"])
+    out = df.groupby("cliente", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
     return out.sort_values("faturamento", ascending=False).head(top_n)
 
 
 def faturamento_por_produto(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
     if notas.empty:
         return pd.DataFrame(columns=["produto", "faturamento", "quantidade", "participacao_pct"])
+    df = _apenas_receita(notas)
+    if df.empty:
+        return pd.DataFrame(columns=["produto", "faturamento", "quantidade", "participacao_pct"])
     agregado = {"valor_item": "sum"}
-    if "quantidade" in notas.columns:
+    if "quantidade" in df.columns:
         agregado["quantidade"] = "sum"
-    out = notas.groupby("produto", as_index=False).agg(agregado).rename(columns={"valor_item": "faturamento"})
+    out = df.groupby("produto", as_index=False).agg(agregado).rename(columns={"valor_item": "faturamento"})
     total = out["faturamento"].sum()
     out["participacao_pct"] = (out["faturamento"] / total * 100) if total else 0.0
     return out.sort_values("faturamento", ascending=False).head(top_n)
@@ -191,7 +251,10 @@ def faturamento_por_produto(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFram
 def faturamento_por_grupo(notas: pd.DataFrame) -> pd.DataFrame:
     if notas.empty:
         return pd.DataFrame(columns=["grupo_produto", "faturamento"])
-    out = notas.groupby("grupo_produto", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
+    df = _apenas_receita(notas)
+    if df.empty:
+        return pd.DataFrame(columns=["grupo_produto", "faturamento"])
+    out = df.groupby("grupo_produto", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
     return out.sort_values("faturamento", ascending=False)
 
 
@@ -200,7 +263,9 @@ def faturamento_por_regiao(notas: pd.DataFrame) -> pd.DataFrame:
     CC2_XREGIA do municipio - ex: Sudeste, Sul, Nordeste)."""
     if notas.empty or "regiao" not in notas.columns:
         return pd.DataFrame(columns=["regiao", "faturamento"])
-    df = notas.copy()
+    df = _apenas_receita(notas).copy()
+    if df.empty:
+        return pd.DataFrame(columns=["regiao", "faturamento"])
     df["regiao"] = df["regiao"].fillna("Sem região").replace("", "Sem região")
     out = df.groupby("regiao", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
     return out.sort_values("faturamento", ascending=False)
@@ -211,7 +276,9 @@ def faturamento_por_regional(notas: pd.DataFrame) -> pd.DataFrame:
     CC2_XREGIO do municipio - area/equipe comercial dentro da regiao)."""
     if notas.empty or "regional" not in notas.columns:
         return pd.DataFrame(columns=["regional", "faturamento"])
-    df = notas.copy()
+    df = _apenas_receita(notas).copy()
+    if df.empty:
+        return pd.DataFrame(columns=["regional", "faturamento"])
     df["regional"] = df["regional"].fillna("Sem regional").replace("", "Sem regional")
     out = df.groupby("regional", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
     return out.sort_values("faturamento", ascending=False)
@@ -223,7 +290,10 @@ def curva_abc_clientes(notas: pd.DataFrame) -> pd.DataFrame:
     if notas.empty:
         return pd.DataFrame(columns=["cliente", "faturamento", "pct_acumulado", "classe"])
 
-    out = notas.groupby("cliente", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
+    df = _apenas_receita(notas)
+    if df.empty:
+        return pd.DataFrame(columns=["cliente", "faturamento", "pct_acumulado", "classe"])
+    out = df.groupby("cliente", as_index=False)["valor_item"].sum().rename(columns={"valor_item": "faturamento"})
     out = out.sort_values("faturamento", ascending=False).reset_index(drop=True)
     total = out["faturamento"].sum()
     out["pct_acumulado"] = out["faturamento"].cumsum() / total * 100 if total else 0
@@ -307,8 +377,11 @@ def clientes_inativos_ou_queda(
     if notas_anterior.empty:
         return pd.DataFrame(columns=cols)
 
-    fat_atual = notas_atual.groupby("cliente")["valor_item"].sum() if not notas_atual.empty else pd.Series(dtype=float)
-    fat_anterior = notas_anterior.groupby("cliente")["valor_item"].sum()
+    fat_atual = (
+        _apenas_receita(notas_atual).groupby("cliente")["valor_item"].sum()
+        if not notas_atual.empty else pd.Series(dtype=float)
+    )
+    fat_anterior = _apenas_receita(notas_anterior).groupby("cliente")["valor_item"].sum()
 
     df = pd.concat(
         [fat_anterior.rename("faturamento_anterior"), fat_atual.rename("faturamento_atual")],

@@ -212,7 +212,39 @@ def _gerar_notas_fiscais(pedidos, itens_pedido, hoje: dt.date):
                 "grupo_produto": item["grupo_produto"],
                 "quantidade": item["qtd_entregue"],
                 "valor_item": valor_item_nf,
+                "tipo_registro": "FATURAMENTO",
             })
+
+            # Simula devolucao de venda (~12% dos itens faturados) para que
+            # o modo DEMO ilustre os cards "Devolucoes"/"Faturamento bruto"
+            # com dados nao-zerados, igual a um ambiente real - segue a
+            # mesma logica de db._fetch_devolucoes_venda(): linha separada,
+            # com valor/quantidade negativos e tipo_registro="DEVOLUCAO".
+            if rng.random() < 0.12:
+                frac = float(rng.uniform(0.2, 0.7))
+                dias_devolucao = int(rng.integers(3, 20))
+                notas_rows.append({
+                    "nota": f"DEV{nota_num:05d}",
+                    "serie": "D",
+                    "emissao_nf": emissao_nf + pd.Timedelta(days=dias_devolucao),
+                    "cod_cliente": ped["cod_cliente"],
+                    "loja_cliente": ped["loja_cliente"],
+                    "cliente": ped["cliente"],
+                    "regiao": ped["regiao"],
+                    "regional": ped["regional"],
+                    "cod_vendedor": ped["cod_vendedor"],
+                    "vendedor": ped["vendedor"],
+                    "valor_faturado": 0.0,
+                    "valor_mercadoria": 0.0,
+                    "pedido": None,
+                    "item_pedido": None,
+                    "cod_produto": item["cod_produto"],
+                    "produto": item["produto"],
+                    "grupo_produto": item["grupo_produto"],
+                    "quantidade": -round(item["qtd_entregue"] * frac, 2),
+                    "valor_item": -round(valor_item_nf * frac, 2),
+                    "tipo_registro": "DEVOLUCAO",
+                })
 
     notas = pd.DataFrame(notas_rows)
     if not notas.empty:

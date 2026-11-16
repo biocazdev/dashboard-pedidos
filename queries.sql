@@ -73,6 +73,8 @@ WHERE C6.D_E_L_E_T_ = ''
 --    faturamento originado de pedidos de um periodo especifico.
 --    O campo de produto na SD2 e D2_COD (confirmado nesta instalacao via
 --    INFORMATION_SCHEMA.COLUMNS) - outras instalacoes podem variar.
+--    tipo_registro: classificacao FATURAMENTO/OUTRAS SAIDAS igual ao Objeto
+--    de Negocio Smart View (TLPP) do cliente - ver nota "RESOLVIDO" abaixo.
 SELECT
     F2.F2_DOC      AS nota,
     F2.F2_SERIE    AS serie,
@@ -82,7 +84,7 @@ SELECT
     A1.A1_NOME     AS cliente,
     CC2.CC2_XREGIA AS regiao,
     CC2.CC2_XREGIO AS regional,
-    F2.F2_VALFAT   AS valor_faturado,     -- valor do CABECALHO da NF (com impostos)
+    F2.F2_VALFAT   AS valor_faturado,     -- valor do CABECALHO da NF (nao confiavel nesta instalacao - ver nota)
     F2.F2_VALMERC  AS valor_mercadoria,
     D2.D2_PEDIDO   AS pedido,
     D2.D2_ITEMPV   AS item_pedido,
@@ -94,7 +96,12 @@ SELECT
         ELSE LTRIM(RTRIM(B1.B1_GRUPO))
     END AS grupo_produto,
     D2.D2_QUANT    AS quantidade,
-    D2.D2_TOTAL    AS valor_item          -- valor do ITEM da NF (usar para somar sem duplicar)
+    D2.D2_TOTAL    AS valor_item,         -- valor do ITEM da NF (usar para somar sem duplicar)
+    CASE
+        WHEN F4.F4_DUPLIC = 'S' AND D2.D2_TIPO NOT IN ('D', 'B')
+            THEN 'FATURAMENTO'
+        ELSE 'OUTRAS SAIDAS'
+    END AS tipo_registro
 FROM SF2{SUF} F2
 INNER JOIN SD2{SUF} D2
        ON D2.D2_DOC = F2.F2_DOC
@@ -109,9 +116,46 @@ LEFT JOIN CC2{SUF} CC2 ON UPPER(RTRIM(CC2.CC2_MUN)) = UPPER(RTRIM(A1.A1_MUN))
                       AND CC2.D_E_L_E_T_ = ''
 LEFT JOIN SB1{SUF} B1 ON B1.B1_COD = D2.D2_COD AND B1.D_E_L_E_T_ = ''
 LEFT JOIN SBM{SUF} BM ON BM.BM_GRUPO = B1.B1_GRUPO AND BM.D_E_L_E_T_ = ''
+LEFT JOIN SF4{SUF} F4 ON F4.F4_CODIGO = D2.D2_TES AND F4.D_E_L_E_T_ = ''
 WHERE F2.D_E_L_E_T_ = ''
   AND F2.F2_FILIAL = '{FILIAL}'
   AND F2.F2_EMISSAO BETWEEN '{DE}' AND '{ATE}';
+
+
+-- 4) Devolucao de VENDA (cliente devolvendo mercadoria) - lancada como nota
+--    de ENTRADA no Protheus (SD1/D1_TIPO='D'), NUNCA aparece em SF2/SD2.
+--    Filtra pela data de DIGITACAO (D1_DTDIGIT), igual ao Objeto de Negocio
+--    Smart View (TLPP) do cliente. O JOIN com SF2 (nota de saida original,
+--    via D1_NFORI/D1_SERIORI/D1_FORNECE/D1_LOJA) serve so para recuperar o
+--    vendedor (F2_VEND1) da venda que foi devolvida.
+--    valor_item e quantidade saem NEGATIVOS (sinal de devolucao), para que,
+--    ao juntar com a consulta 3) acima, a soma por cliente/vendedor/produto
+--    ja fique liquida de devolucao automaticamente.
+SELECT
+    D1.D1_DOC      AS nota,
+    D1.D1_SERIE    AS serie,
+    D1.D1_DTDIGIT  AS emissao_nf,
+    D1.D1_FORNECE  AS cod_cliente,        -- na devolucao de venda, o campo "fornecedor" guarda o codigo do CLIENTE
+    D1.D1_LOJA     AS loja_cliente,
+    A1.A1_NOME     AS cliente,
+    CC2.CC2_XREGIA AS regiao,
+    CC2.CC2_XREGIO AS regional,
+    F2.F2_VEND1    AS cod_vendedor,
+    -D1.D1_QUANT   AS quantidade,
+    -D1.D1_TOTAL   AS valor_item,
+    'DEVOLUCAO'    AS tipo_registro
+FROM SD1{SUF} D1
+LEFT JOIN SF2{SUF} F2 ON F2.F2_DOC = D1.D1_NFORI AND F2.F2_SERIE = D1.D1_SERIORI
+                      AND F2.F2_CLIENTE = D1.D1_FORNECE AND F2.F2_LOJA = D1.D1_LOJA
+                      AND F2.D_E_L_E_T_ = ''
+LEFT JOIN SA1{SUF} A1 ON A1.A1_COD = D1.D1_FORNECE AND A1.A1_LOJA = D1.D1_LOJA AND A1.D_E_L_E_T_ = ''
+LEFT JOIN CC2{SUF} CC2 ON UPPER(RTRIM(CC2.CC2_MUN)) = UPPER(RTRIM(A1.A1_MUN))
+                      AND UPPER(RTRIM(CC2.CC2_EST)) = UPPER(RTRIM(A1.A1_EST))
+                      AND CC2.D_E_L_E_T_ = ''
+WHERE D1.D_E_L_E_T_ = ''
+  AND D1.D1_FILIAL = '{FILIAL}'
+  AND D1.D1_TIPO = 'D'
+  AND D1.D1_DTDIGIT BETWEEN '{DE}' AND '{ATE}';
 
 
 -- Observacoes importantes:
@@ -140,21 +184,33 @@ WHERE F2.D_E_L_E_T_ = ''
 --     SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
 --     WHERE TABLE_NAME IN ('SC5xxx','SC6xxx','SD2xxx','SF2xxx','SA1xxx','SB1xxx','SA3xxx')
 --   para descobrir os nomes reais.
--- * CONHECIDO/RESOLVIDO (diagnostico em 2026-11-15/16, com o usuario Lealdo):
---   nesta instalacao, F2_VALFAT (usado originalmente no KPI "Faturamento
---   total c/ impostos") NAO e preenchido de forma confiavel - varias notas
---   tem F2_VALFAT = 0 mesmo com itens/F2_VALMERC normais, e pelo menos uma
---   nota teve F2_VALFAT divergente do valor real sem explicacao aparente.
---   Testes adicionais em 2026-11-16 (consulta direta no banco pelo usuario)
---   confirmaram que F2_VALMERC e F2_VALBRUT batem EXATAMENTE com
---   SUM(D2_TOTAL) nas 18 notas do periodo testado (ate o centavo) - ou seja,
---   nesta empresa/periodo nao ha valor de imposto somado "por fora" no
---   cabecalho da nota (compativel com ICMS "por dentro" do preco e ausencia
---   de IPI nessas notas). Decisao do cliente (Biocaz): trocar
---   kpis.faturamento_bruto_cabecalho() para usar F2_VALMERC a partir de
---   2026-11-16 (commit correspondente no historico do dashboard). O
---   indicador "Faturamento total (c/ impostos)" deve, por enquanto, aparecer
---   igual ao "Faturamento liquido" - isso e esperado dado o resultado acima,
---   e nao um bug. Pendente: confirmar com o time fiscal/TI do Protheus se
---   deveria haver IPI ou outro imposto por fora nessas notas; se confirmado
---   que sim, revisar o campo/calculo novamente.
+-- * CONHECIDO/RESOLVIDO (investigacao em 2026-11-15/16, com o usuario
+--   Lealdo). Linha do tempo:
+--   1) F2_VALFAT (usado originalmente no KPI "Faturamento total c/
+--      impostos") nao e preenchido de forma confiavel nesta instalacao -
+--      varias notas com F2_VALFAT = 0, pelo menos uma divergente.
+--   2) Teste seguinte mostrou F2_VALMERC e F2_VALBRUT batendo EXATAMENTE
+--      com SUM(D2_TOTAL) nas 18 notas do periodo testado - levou a crer,
+--      por um momento, que bruto/liquido se diferenciavam por imposto (e
+--      que nesta empresa nao haveria imposto "por fora" no cabecalho).
+--   3) O usuario compartilhou o codigo-fonte TLPP do Objeto de Negocio
+--      Smart View "Acompanhamento Gerencial de Faturamento" que ele ja usa
+--      direto no Protheus (relatorio oficial de referencia). Esse codigo
+--      mostrou que a hipotese do passo 2 estava incompleta: la, bruto e
+--      liquido NUNCA incluem IPI/ST (ambos ja vem "sem imposto por fora")
+--      - a diferenca real entre eles e DEVOLUCAO DE VENDA, lancada como
+--      nota de ENTRADA (SD1/D1_TIPO='D'), que nunca aparece em SF2/SD2 e
+--      por isso nunca tinha sido considerada no dashboard. O mesmo codigo
+--      tambem mostrou que nem todo item de SD2 e receita: so conta quando
+--      a TES gera duplicata (F4_DUPLIC='S') e o tipo nao e devolucao a
+--      fornecedor ('D') nem beneficiamento ('B') - o resto (remessa,
+--      bonificacao, amostra, devolucao a fornecedor, beneficiamento) e
+--      "outras saidas", que nunca deveria contar como faturamento.
+--   RESOLUCAO (2026-11-16): dashboard passou a replicar essa logica -
+--   consulta 3) acima classifica FATURAMENTO vs OUTRAS SAIDAS via SF4/
+--   D2_TIPO, e a consulta 4) traz devolucao de venda via SD1. kpis.py:
+--   faturamento_bruto() = soma FATURAMENTO; devolucoes_total() = soma
+--   DEVOLUCAO; faturamento_total() (liquido) = bruto - devolucoes. Pendente
+--   apenas confirmar com o time fiscal/TI se ha algum outro imposto "por
+--   fora" nao capturado em nenhum campo testado (F2_VALFAT/VALMERC/
+--   VALBRUT) - se confirmado, revisar novamente.
