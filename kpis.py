@@ -212,6 +212,33 @@ def evolucao_mensal(notas: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values("mes")
 
 
+def evolucao_mensal_detalhada(notas: pd.DataFrame) -> pd.DataFrame:
+    """Mesma quebra mensal de evolucao_mensal(), mas com o detalhe por mes
+    de bruto/devolucoes/liquido/qtd de notas - usado na tabela de detalhes
+    abaixo do grafico de evolucao mensal. Reaproveita as mesmas funcoes dos
+    cards do topo (faturamento_bruto/devolucoes_total/faturamento_total/
+    total_notas), entao as definicoes ficam sempre identicas."""
+    cols = ["mes", "faturamento_bruto", "devolucoes", "faturamento_liquido", "qtd_notas"]
+    if notas.empty:
+        return pd.DataFrame(columns=cols)
+
+    df = notas.copy()
+    df["mes"] = df["emissao_nf"].dt.to_period("M").dt.to_timestamp()
+
+    linhas = []
+    for mes, grupo in df.groupby("mes"):
+        linhas.append({
+            "mes": mes,
+            "faturamento_bruto": faturamento_bruto(grupo),
+            "devolucoes": devolucoes_total(grupo),
+            "faturamento_liquido": faturamento_total(grupo),
+            "qtd_notas": total_notas(grupo),
+        })
+    if not linhas:
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame(linhas).sort_values("mes")[cols]
+
+
 def faturamento_por_vendedor(notas: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
     if notas.empty:
         return pd.DataFrame(columns=["vendedor", "faturamento"])
@@ -310,8 +337,9 @@ def curva_abc_clientes(notas: pd.DataFrame) -> pd.DataFrame:
 
 
 def saldo_a_faturar_por_cliente(itens_pedido: pd.DataFrame, pedidos: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
+    cols = ["cliente", "saldo", "qtd_itens", "qtd_pedidos"]
     if itens_pedido.empty or pedidos.empty:
-        return pd.DataFrame(columns=["cliente", "saldo"])
+        return pd.DataFrame(columns=cols)
 
     df = itens_pedido.copy()
     df["saldo_qtd"] = (df["qtd_pedida"] - df["qtd_entregue"]).clip(lower=0)
@@ -319,8 +347,12 @@ def saldo_a_faturar_por_cliente(itens_pedido: pd.DataFrame, pedidos: pd.DataFram
     df["saldo_valor"] = df["saldo_qtd"] * df["preco_unit"]
 
     merged = df.merge(pedidos[["pedido", "cliente"]].drop_duplicates(subset=["pedido"]), on="pedido", how="left")
-    out = merged.groupby("cliente", as_index=False)["saldo_valor"].sum().rename(columns={"saldo_valor": "saldo"})
-    return out.sort_values("saldo", ascending=False).head(top_n)
+    out = merged.groupby("cliente", as_index=False).agg(
+        saldo=("saldo_valor", "sum"),
+        qtd_itens=("saldo_valor", "size"),
+        qtd_pedidos=("pedido", "nunique"),
+    )
+    return out.sort_values("saldo", ascending=False).head(top_n)[cols]
 
 
 def faturamento_por_produto_filtrado(

@@ -575,6 +575,23 @@ with aba_geral:
         fig.update_yaxes(rangemode="tozero")
         st.plotly_chart(fig, use_container_width=True)
 
+        evo_detalhe = kpis.evolucao_mensal_detalhada(notas)
+        if not evo_detalhe.empty:
+            tabela_evo = evo_detalhe.copy()
+            tabela_evo["mes"] = tabela_evo["mes"].dt.strftime("%b/%Y")
+            tabela_evo["faturamento_bruto"] = tabela_evo["faturamento_bruto"].apply(moeda)
+            tabela_evo["devolucoes"] = tabela_evo["devolucoes"].apply(moeda)
+            tabela_evo["faturamento_liquido"] = tabela_evo["faturamento_liquido"].apply(moeda)
+            tabela_evo["qtd_notas"] = tabela_evo["qtd_notas"].apply(numero)
+            colunas_evo = {
+                "mes": "Mês", "faturamento_bruto": "Faturamento bruto",
+                "devolucoes": "Devoluções", "faturamento_liquido": "Faturamento líquido",
+                "qtd_notas": "Notas fiscais",
+            }
+            tabela_evo = tabela_evo.rename(columns=colunas_evo)
+            with st.expander("Ver detalhes da evolução mensal (tabela)"):
+                st.dataframe(tabela_evo, use_container_width=True, hide_index=True)
+
 # ===========================================================================
 # ABA: Rankings & Mix
 # ===========================================================================
@@ -873,3 +890,18 @@ with aba_alertas:
         estiliza_eixos(fig)
         aplica_rotulos_esquerda(fig, saldo_cli["cliente"])
         grafico_clicavel(fig, "chart_saldo_cliente", 360, "y", "filtro_cliente")
+
+        tabela_saldo = saldo_cli.sort_values("saldo", ascending=False).copy()
+        tabela_saldo["saldo"] = tabela_saldo["saldo"].apply(moeda)
+        if "qtd_itens" in tabela_saldo.columns:
+            tabela_saldo["qtd_itens"] = tabela_saldo["qtd_itens"].apply(numero)
+        if "qtd_pedidos" in tabela_saldo.columns:
+            tabela_saldo["qtd_pedidos"] = tabela_saldo["qtd_pedidos"].apply(numero)
+        colunas_saldo = {
+            "cliente": "Cliente", "saldo": "Saldo a faturar",
+            "qtd_itens": "Itens em aberto", "qtd_pedidos": "Pedidos",
+        }
+        tabela_saldo = tabela_saldo[[c for c in colunas_saldo if c in tabela_saldo.columns]]
+        tabela_saldo = tabela_saldo.rename(columns=colunas_saldo)
+        with st.expander("Ver detalhes do saldo a faturar (tabela)"):
+            st.dataframe(tabela_saldo, use_container_width=True, hide_index=True)
