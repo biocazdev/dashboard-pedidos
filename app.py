@@ -579,6 +579,10 @@ with aba_geral:
 # ABA: Rankings & Mix
 # ===========================================================================
 with aba_rankings:
+    st.caption(
+        "Valores negativos (barra cruzando para a esquerda do zero) indicam que a devolução de venda "
+        "superou o faturamento daquele cliente/produto/região/regional no período selecionado."
+    )
     col_a, col_b = st.columns(2)
 
     with col_a:
